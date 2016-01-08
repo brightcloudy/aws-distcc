@@ -83,46 +83,40 @@ response_create = ec2.request_spot_instances({
 if (opts[:dry_run])
   exit
 end
+sleep 1
 req_ids = response_create.spot_instance_requests.each.collect{ |x| x.spot_instance_request_id }
-byebug
-ec2.wait_until(:spot_instance_request_fulfilled, spot_instance_request_ids: req_ids) do |waiter|
-  waiter.delay = 10
-  waiter.before_attempt do |attempts|
-    print "Attempt #" + (attempts + 1).to_s + "... "
-  end
-  waiter.before_wait do |attempts, response|
-    statcodes = response.spot_instance_requests.each.collect {|x| x.status.code}
-    statcodes.each do |statcode|
-      print statcode.strip() + " "
-      if (["bad-parameters","capacity-not-available","capacity-oversubscribed","constraint-not-fulfillable","price-too-low","system-error"].include?(statcode))
+requests_fulfilled = []
+request_instance_map = Hash.new()
+print "Waiting for instances to be fulfilled... "
+while (requests_fulfilled.length < req_ids.length) do
+  req_status = ec2.describe_spot_instance_requests( { spot_instance_request_ids: req_ids } )
+  statcodes = req_status.spot_instance_requests.each.collect {|x| [x.spot_instance_request_id, x.status.code, x.instance_id]}
+  statcodes.each do |id, statcode, instance_id|
+    if ("pending-evaluation" == statcode)
+      print '.'
+    elsif ("pending-fulfillment" == statcode)
+      print '+'
+    elsif ("fulfilled" == statcode)
+      if !(requests_fulfilled.include?(id)) 
+        requests_fulfilled.push(id)
+        request_instance_map.store(id, instance_id)
+        print '!'
+      end
+    elsif (["bad-parameters","capacity-not-available","capacity-oversubscribed","constraint-not-fulfillable","price-too-low","system-error"].include?(statcode))
         puts "Something went wrong!"
         exit
-      end
-      puts ' '
     end
   end
+  sleep 5
 end
+puts ' '
+
 new_instance = ec2.describe_instances({
-  filters: [
-  {
-    name: "spot-instance-request-id",
-    values: req_ids
-  }]
+  instance_ids: request_instance_map.each_pair.collect { |reqid, instid| instid }
 })
 new_instances = new_instance.reservations[0].instances
 
-new_instance.reservations[0].instances.each do |instance|
+new_instances.each do |instance|
   puts "Instance " + instance.instance_id
   puts "Public IP: " + instance.public_ip_address
-end
-new_instances.each do |instance|
-  ec2.wait_until(:instance_status_ok, instance_ids: [instance.instance_id]) do |w|
-    w.delay = 5
-    w.before_attempt do |attempts|
-      print "Poll #" + (attempts + 1).to_s + "... "
-    end
-    w.before_wait do |attempts, response|
-      puts response.reservations[0].instances[0].state.name
-    end
-  end
 end
