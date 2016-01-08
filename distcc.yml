@@ -1,0 +1,5 @@
+---
+- hosts: all
+  remote_user: fedora
+  tasks:
+  - git: repo=https://github.com/distcc/distcc.git dest=/home/fedora/distcc

@@ -1,0 +1,5 @@
+---
+- hosts: all
+  remote_user: fedora
+  tasks:
+  - command: /usr/bin/sudo /usr/bin/dnf -y install git vim tmux gcc make python python-devel autoconf automake binutils-devel redhat-rpm-config gcc-c++
