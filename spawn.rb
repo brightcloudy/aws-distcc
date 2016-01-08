@@ -3,6 +3,8 @@ require 'aws-sdk'
 require 'yaml'
 require 'trollop'
 require 'securerandom'
+require 'rubygems'
+require 'byebug'
 
 opts = Trollop::options do
   opt :instance_type, "Instance type", :type => :string, :default => "c4.large", :short => "-t", :multi => false
@@ -47,7 +49,7 @@ current_spots = spot_price_current.spot_price_history.collect { |x| [x.spot_pric
 avgprice = current_spots.each.collect { |price, zone, time| price }.inject(0.0) { |sum, ea| sum + ea.to_f } / current_spots.length
 avgprice = avgprice.round(4)
 current_spots.each do |price, zone, time|
-  puts "Zone " + zone + ": " + price
+  puts "Zone " + zone + ": " + price.to_f.round(4).to_s
 end
 puts "Average Price: " + avgprice.to_s
 new_price = avgprice.to_f * opts[:multiplier]
@@ -81,26 +83,46 @@ response_create = ec2.request_spot_instances({
 if (opts[:dry_run])
   exit
 end
-req_id = response_create.spot_instance_requests[0].spot_instance_request_id
-ec2.wait_until(:spot_instance_request_fulfilled, spot_instance_request_ids: [ req_id ]) do |waiter|
-  waiter.delay = 2
+req_ids = response_create.spot_instance_requests.each.collect{ |x| x.spot_instance_request_id }
+byebug
+ec2.wait_until(:spot_instance_request_fulfilled, spot_instance_request_ids: req_ids) do |waiter|
+  waiter.delay = 10
   waiter.before_attempt do |attempts|
     print "Attempt #" + (attempts + 1).to_s + "... "
   end
   waiter.before_wait do |attempts, response|
-    puts response.spot_instance_requests[0].status.code
+    statcodes = response.spot_instance_requests.each.collect {|x| x.status.code}
+    statcodes.each do |statcode|
+      print statcode.strip() + " "
+      if (["bad-parameters","capacity-not-available","capacity-oversubscribed","constraint-not-fulfillable","price-too-low","system-error"].include?(statcode))
+        puts "Something went wrong!"
+        exit
+      end
+      puts ' '
+    end
   end
 end
 new_instance = ec2.describe_instances({
   filters: [
   {
     name: "spot-instance-request-id",
-    values: [req_id]
+    values: req_ids
   }]
 })
-the_instance = new_instance.reservations[0].instances.each do |instance|
-  puts "New Instance " + instance.instance_id
+new_instances = new_instance.reservations[0].instances
+
+new_instance.reservations[0].instances.each do |instance|
+  puts "Instance " + instance.instance_id
   puts "Public IP: " + instance.public_ip_address
-  puts "Private IP: " + instance.private_ip_address
 end
-puts "done"
+new_instances.each do |instance|
+  ec2.wait_until(:instance_status_ok, instance_ids: [instance.instance_id]) do |w|
+    w.delay = 5
+    w.before_attempt do |attempts|
+      print "Poll #" + (attempts + 1).to_s + "... "
+    end
+    w.before_wait do |attempts, response|
+      puts response.reservations[0].instances[0].state.name
+    end
+  end
+end

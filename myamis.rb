@@ -40,12 +40,18 @@ if (opts[:filter].length != 0)
   describe_images_struct.store(:filters, filters)
 end
 
-puts describe_images_struct.inspect()
 if (describe_images_struct == [])
   Trollop::die "One of id, owner, or filter must be specified!"
 end
 resp = ec2.describe_images(describe_images_struct)
 resp.images.each do |image|
-  puts image.name
-  puts image.description
+  puts "---"
+  puts "Image " + image.image_id
+  puts "---"
+  puts "Name: " + image.name
+  puts "Description: " + image.description
+  puts "Date Created: " + image.creation_date
+  puts "State: " + image.state
+  puts "Architecture: " + image.architecture
+  puts "Type: " + image.image_type
 end

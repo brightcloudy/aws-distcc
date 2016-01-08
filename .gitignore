@@ -1,2 +1,4 @@
 credentials.yml
 nohup.out
+Gemfile.lock
+.byebug_history
